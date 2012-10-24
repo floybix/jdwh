@@ -73,7 +73,8 @@
         idxs (range 1 (inc (.getColumnCount rsmeta)))
         labs (mapv (fn [i] (.getColumnLabel rsmeta i)) idxs)
         ks (mapv keyword labs)
-        rows (sql/resultset-seq rset)]
+        rows (sql/resultset-seq rset)
+        rowcount (atom 0)]
     (if is-show
       (let [row1col1 (ffirst rows)]
         (println (str/replace (val row1col1) #"\r" "\n")))
@@ -81,8 +82,9 @@
         (print (csv/write-csv [labs]))
         (doseq [row0 rows
                 :let [row (mapv row0 ks)]]
-          (print (csv/write-csv [(mapv str row)])))))
-    (count rows)))
+          (print (csv/write-csv [(mapv str row)]))
+          (swap! rowcount inc))))
+    @rowcount))
 
 (defn process-warnings
   "Print any warnings from a PreparedStatement or Connection, and reset."
