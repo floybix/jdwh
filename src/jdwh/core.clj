@@ -21,6 +21,13 @@
     (apply println args)
     (flush)))
 
+(defn read-password
+  [dbc-name]
+  (do (binding [*out* *err*]
+        (print (format "Enter password for %s: " dbc-name))
+        (flush))
+      (read-line)))
+
 (defn get-db-config
   "Read database connection parameters from ~/.odbc.ini"
   [dbc-name]
@@ -37,17 +44,21 @@
         (msg "Section [" dbc-name "] not found in ~/.odbc.ini")
         (when @debug (msg conf))
         (System/exit 1))
-      {:subprotocol "teradata"
-       :classname "com.teradata.jdbc.TeraDriver"
-       :subname (str "//" dbc "/")
-       :user (sect "Username" user)
-       :password (sect "Password")
-       :CHARSET "UTF8"
-       :USEXVIEWS "ON"})))
+      (let [pwd0 (sect "Password")
+            pwd (if (str/blank? pwd0)
+                  (read-password dbc-name)
+                  pwd0)]
+        {:subprotocol "teradata"
+         :classname "com.teradata.jdbc.TeraDriver"
+         :subname (str "//" dbc "/")
+         :user (sect "Username" user)
+         :password pwd
+         :CHARSET "UTF8"
+         :USEXVIEWS "ON"}))))
 
 (defn strip-sql-comments
-  "Remove comments from SQL code. It is very hard to do this in
-   general because the comments might be embedded inside literal
+  "Remove comments from SQL code. It is hard to do this without a
+   parser because the comments might be embedded inside literal
    strings. Here we assume that '--' at the start of a line is a
    comment (not inside a string) and that all '/* */' blocks are
    comments (not inside a string). This will leave some '--' comments
@@ -60,10 +71,10 @@
       (str/replace #"(?m)--.*;.*" "")
       (str/replace #"(?s)[\n\r]{2,}+" "\n")))
 
-(defn resultset-vecseq
+(defn resultset-seqseq
   "Creates and returns a lazy sequence of seqs corresponding to
    the rows in the java.sql.ResultSet rs. Modified from clojure.core.
-   The column names are returned in meta :column-names."
+   The column names are returned in the first row."
   [^java.sql.ResultSet rs]
   (let [rsmeta (.getMetaData rs)
         idxs (range 1 (inc (.getColumnCount rsmeta)))
@@ -74,7 +85,7 @@
         rows (fn thisfn []
                (when (.next rs)
                  (cons (doall (row-values)) (lazy-seq (thisfn)))))]
-    (vary-meta (rows) assoc :column-names nms)))
+    (cons nms (rows))))
 
 (defn print-query-results
   "From a ResultSet print rows as CSV to *out* including
@@ -83,8 +94,7 @@
    of (sql/with-query-results) but that uses hashmaps and so loses the
    order of columns."
   [rset]
-  (let [rows (resultset-vecseq rset)
-        nms (:column-names (meta rows))]
+  (let [[nms & rows] (resultset-seqseq rset)]
     (print (csv/write-csv [nms]))
     (loop [[row & more] rows
            n-rows 0]
