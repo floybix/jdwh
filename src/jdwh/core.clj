@@ -60,31 +60,49 @@
       (str/replace #"(?m)--.*;.*" "")
       (str/replace #"(?s)[\n\r]{2,}+" "\n")))
 
+(defn resultset-vecseq
+  "Creates and returns a lazy sequence of seqs corresponding to
+   the rows in the java.sql.ResultSet rs. Modified from clojure.core.
+   The column names are returned in meta :column-names."
+  [^java.sql.ResultSet rs]
+  (let [rsmeta (.getMetaData rs)
+        idxs (range 1 (inc (.getColumnCount rsmeta)))
+        nms (doall (map (fn [i] (.getColumnName rsmeta i)) idxs))
+        check-keys (or (apply distinct? nms)
+                       (throw (Exception. "ResultSet must have unique column names")))
+        row-values (fn [] (map (fn [^Integer i] (.getObject rs i)) idxs))
+        rows (fn thisfn []
+               (when (.next rs)
+                 (cons (doall (row-values)) (lazy-seq (thisfn)))))]
+    (vary-meta (rows) assoc :column-names nms)))
+
 (defn print-query-results
   "From a ResultSet print rows as CSV to *out* including
    column names in the first row. Returns number of rows.
    Does not keep the data in memory. This could be a simple use
    of (sql/with-query-results) but that uses hashmaps and so loses the
-   order of columns.
-   If `is-show` then the query is assumed to be a SHOW and we print the
-   first value reformatted with newlines."
-  [rset is-show]
-  (let [rsmeta (.getMetaData rset)
-        idxs (range 1 (inc (.getColumnCount rsmeta)))
-        labs (mapv (fn [i] (.getColumnLabel rsmeta i)) idxs)
-        ks (mapv keyword labs)
-        rows (sql/resultset-seq rset)
-        rowcount (atom 0)]
-    (if is-show
-      (let [row1col1 (ffirst rows)]
-        (println (str/replace (val row1col1) #"\r" "\n")))
-      (do
-        (print (csv/write-csv [labs]))
-        (doseq [row0 rows
-                :let [row (mapv row0 ks)]]
-          (print (csv/write-csv [(mapv str row)]))
-          (swap! rowcount inc))))
-    @rowcount))
+   order of columns."
+  [rset]
+  (let [rows (resultset-vecseq rset)
+        nms (:column-names (meta rows))]
+    (print (csv/write-csv [nms]))
+    (loop [[row & more] rows
+           n-rows 0]
+      (if row
+        (let [row-strs (mapv str row)]
+          (print (csv/write-csv [row-strs]))
+          (recur more (inc n-rows)))
+        n-rows))))
+
+(defn print-show-result
+  "From a SHOW TABLE ResultSet print the resulting DDL text to *out*.
+   Assume that the result text is given in a single record entry.
+   Reformat with unix newlines."
+  [rset]
+  (let [rows (resultset-seq rset)
+        ddl-txt (val (ffirst rows))]
+    (println (str/replace ddl-txt #"\r" "\n"))
+    (count rows)))
 
 (defn process-warnings
   "Print any warnings from a PreparedStatement or Connection, and reset."
@@ -103,7 +121,7 @@
      (run-sql-request! req 2))
   ([req retries]
      (when @echo (msg req "\n"))
-     (let [start-time (. System (nanoTime))]
+     (let [start-time (System/nanoTime)]
      (try
        (with-open [^PreparedStatement
                    stmt (sql/prepare-statement (sql/connection) req)]
@@ -115,8 +133,10 @@
                 counts (.getUpdateCount stmt)
                 is-show (re-seq #"(?si)^\s*show" req)]
            (if has-results
-             (let [rows (print-query-results (.getResultSet stmt) is-show)]
-               (msg "  *** Query successful," rows "rows returned."))
+             (if is-show
+               (print-show-result (.getResultSet stmt))
+               (let [rows (print-query-results (.getResultSet stmt))]
+                 (msg "  *** Query successful," rows "rows returned.")))
              ;; else (not a query)
              (when (not= counts -1)
                (msg "  *** Command successful,", counts "rows changed.")))
@@ -142,7 +162,7 @@
            (when-not @keep-going (throw e))))
        (finally
          (when @timing
-           (let [end-time (. System (nanoTime))]
+           (let [end-time (System/nanoTime)]
              (msg (format "  *** Elapsed time: %.2f seconds"
                           (/ (- end-time start-time) 1e9))))))))))
 

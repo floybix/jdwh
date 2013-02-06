@@ -1,4 +1,4 @@
-(defproject jdwh "0.7.1"
+(defproject jdwh "0.8.0"
   :description "Command-line interface to the DWH via JDBC"
   :url "https://github.com/floybix/jdwh"
   :license {:name "Eclipse Public License"
