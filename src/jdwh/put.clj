@@ -39,6 +39,8 @@
   "
 jdwhput -- a command-line JDBC uploader to DWH.
 
+Records are inserted by column order, not by column name.
+
 Usage:
 
   jdwhput -i INPUT.CSV --table PINFO.FOO [args]
@@ -102,4 +104,5 @@ Usage:
           (System/exit 1))
         (catch SQLException e
           (msg "  ***" (with-out-str (sql/print-sql-exception-chain e)))
-          (System/exit 1))))))
+          (System/exit 1)))))
+  (shutdown-agents))

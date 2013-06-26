@@ -22,11 +22,16 @@
     (flush)))
 
 (defn read-password
-  [dbc-name]
-  (do (binding [*out* *err*]
-        (print (format "Enter password for %s: " dbc-name))
-        (flush))
-      (read-line)))
+  "Read a password interactively from the console.
+   java -jar (lein uberjar) will use readPassword with no echo,
+   but this is not available in the lein repl."
+  [prompt]
+  (binding [*out* *err*]
+    (print prompt)
+    (flush)
+    (if (System/console)
+      (String. (.readPassword (System/console)))
+      (read-line))))
 
 (defn get-db-config
   "Read database connection parameters from ~/.odbc.ini"
@@ -46,7 +51,8 @@
         (System/exit 1))
       (let [pwd0 (sect "Password")
             pwd (if (str/blank? pwd0)
-                  (read-password dbc-name)
+                  (read-password (format "Enter password for %s: "
+                                         dbc-name))
                   pwd0)]
         {:subprotocol "teradata"
          :classname "com.teradata.jdbc.TeraDriver"
@@ -338,4 +344,5 @@ Query results are written to stdout or --out as CSV.
                  (run-sql! sql-str tags explain)))))
         (catch SQLException e
           (msg "  ***" (with-out-str (sql/print-sql-exception e)))
-          (System/exit 1))))))
+          (System/exit 1)))))
+  (shutdown-agents))
